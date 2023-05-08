@@ -148,10 +148,13 @@ class GPT(nn.Module):
                     config.n_embd,
                     config.n_embd * 4,
                     config.n_head,
-                    hidden_dropout=config.dropout,
+                    hidden_dropout=config.dropout,  # TODO: does nanoGPT have an extra dropout layer?
                     attention_dropout=config.dropout,
-                    init_method=self._init_weights,
-                    output_layer_init_method=self._init_weights
+                    init_method=self._init_weights,  # TODO: does this init everything?
+                    output_layer_init_method=self._init_weights,
+                    bias=config.bias,
+                    # Optional, for speedups
+                    fuse_qkv_params=True,
                 )
             else:
                 print("Using transformer layer from nanoGPT")
