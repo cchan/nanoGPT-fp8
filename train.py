@@ -20,6 +20,7 @@ import os
 import time
 import math
 import pickle
+import contextlib
 from contextlib import nullcontext
 
 import numpy as np
@@ -100,9 +101,26 @@ torch.manual_seed(1337 + seed_offset)
 torch.backends.cuda.matmul.allow_tf32 = True # allow tf32 on matmul
 torch.backends.cudnn.allow_tf32 = True # allow tf32 on cudnn
 device_type = 'cuda' if 'cuda' in device else 'cpu' # for later use in torch.autocast
-# note: float16 data type will automatically use a GradScaler
-ptdtype = {'float32': torch.float32, 'bfloat16': torch.bfloat16, 'float16': torch.float16}[dtype]
-ctx = nullcontext() if device_type == 'cpu' else torch.amp.autocast(device_type=device_type, dtype=ptdtype)
+
+if dtype == "fp8":
+    import transformer_engine.pytorch as te
+    from transformer_engine.common.recipe import Format, DelayedScaling
+    fp8_format = Format.HYBRID
+    # Reasonable default setting
+    fp8_recipe = DelayedScaling(fp8_format=fp8_format, amax_history_len=16, amax_compute_algo="max")
+    # Note: wrapped ctx in a function because the te.fp8_autocast object cannot be reused as a context for some reason.
+    @contextlib.contextmanager
+    def ctx():
+        with te.fp8_autocast(enabled=True, fp8_recipe=fp8_recipe):
+            with torch.amp.autocast(device_type=device_type, dtype=torch.bfloat16):
+                yield
+    if compile:
+        print("WARNING: setting compile to False for dtype=fp8")
+    compile = False
+else:
+    # note: float16 data type will automatically use a GradScaler
+    ptdtype = {'float32': torch.float32, 'bfloat16': torch.bfloat16, 'float16': torch.float16}[dtype]
+    ctx = lambda: nullcontext() if device_type == 'cpu' else torch.amp.autocast(device_type=device_type, dtype=ptdtype)
 
 # poor man's data loader
 data_dir = os.path.join('data', dataset)
@@ -209,7 +227,7 @@ def estimate_loss():
         losses = torch.zeros(eval_iters)
         for k in range(eval_iters):
             X, Y = get_batch(split)
-            with ctx:
+            with ctx():
                 logits, loss = model(X, Y)
             losses[k] = loss.item()
         out[split] = losses.mean()
@@ -285,7 +303,7 @@ while True:
             # I really dislike that this bloats the code and forces us to repeat code
             # looking at the source of that context manager, it just toggles this variable
             model.require_backward_grad_sync = (micro_step == gradient_accumulation_steps - 1)
-        with ctx:
+        with ctx():
             logits, loss = model(X, Y)
         # immediately async prefetch next batch while model is doing the forward pass on the GPU
         X, Y = get_batch('train')

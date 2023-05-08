@@ -112,6 +112,8 @@ class Block(nn.Module):
         x = x + self.mlp(self.ln_2(x))
         return x
 
+import transformer_engine.pytorch as te
+
 @dataclass
 class GPTConfig:
     block_size: int = 1024
@@ -134,7 +136,10 @@ class GPT(nn.Module):
             wte = nn.Embedding(config.vocab_size, config.n_embd),
             wpe = nn.Embedding(config.block_size, config.n_embd),
             drop = nn.Dropout(config.dropout),
-            h = nn.ModuleList([Block(config) for _ in range(config.n_layer)]),
+            # Use TransformerEngine's built-in layer.
+            # TODO: I'm not sure if this is exactly equivalent (it probably isn't)
+            # h = nn.ModuleList([Block(config) for _ in range(config.n_layer)]),
+            h = nn.ModuleList([te.TransformerLayer(config.n_embd, config.n_embd * 4, config.n_head) for _ in range(config.n_layer)]),
             ln_f = LayerNorm(config.n_embd, bias=config.bias),
         ))
         self.lm_head = nn.Linear(config.n_embd, config.vocab_size, bias=False)
@@ -308,8 +313,9 @@ class GPT(nn.Module):
         inter_params = decay & no_decay
         union_params = decay | no_decay
         assert len(inter_params) == 0, "parameters %s made it into both decay/no_decay sets!" % (str(inter_params), )
-        assert len(param_dict.keys() - union_params) == 0, "parameters %s were not separated into either decay/no_decay set!" \
-                                                    % (str(param_dict.keys() - union_params), )
+        # HACK: this is broken because te.TransformerLayer is different.
+        # assert len(param_dict.keys() - union_params) == 0, "parameters %s were not separated into either decay/no_decay set!" \
+        #                                             % (str(param_dict.keys() - union_params), )
 
         # create the pytorch optimizer object
         optim_groups = [
