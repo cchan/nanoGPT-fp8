@@ -10,6 +10,7 @@ https://github.com/huggingface/transformers/blob/main/src/transformers/models/gp
 import math
 import inspect
 from dataclasses import dataclass
+from functools import partial
 
 import torch
 import torch.nn as nn
@@ -150,8 +151,8 @@ class GPT(nn.Module):
                     config.n_head,
                     hidden_dropout=config.dropout,  # TODO: does nanoGPT have an extra dropout layer?
                     attention_dropout=config.dropout,
-                    init_method=self._init_weights,  # TODO: does this init everything?
-                    output_layer_init_method=self._init_weights,
+                    init_method=self._init_weights,
+                    output_layer_init_method=partial(torch.nn.init.normal_, mean=0.0, std=0.02/math.sqrt(2 * config.n_layer)),
                     bias=config.bias,
                     # Optional, for speedups
                     fuse_qkv_params=True,
@@ -178,7 +179,7 @@ class GPT(nn.Module):
         self.apply(self._init_weights)
         # apply special scaled init to the residual projections, per GPT-2 paper
         for pn, p in self.named_parameters():
-            if pn.endswith('c_proj.weight'):
+            if pn.endswith('c_proj.weight') or pn.endswith('layernorm_mlp.fc2_weight') or pn.endswith('self_attention.proj.weight'):
                 torch.nn.init.normal_(p, mean=0.0, std=0.02/math.sqrt(2 * config.n_layer))
 
         # report number of parameters
