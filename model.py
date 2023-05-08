@@ -204,7 +204,7 @@ class GPT(nn.Module):
         elif isinstance(module, nn.Embedding):
             torch.nn.init.normal_(module.weight, mean=0.0, std=0.02)
 
-    def forward(self, idx, targets=None):
+    def forward(self, idx, targets=None, is_first_microbatch=None):
         device = idx.device
         b, t = idx.size()
         assert t <= self.config.block_size, f"Cannot forward sequence of length {t}, block size is only {self.config.block_size}"
@@ -214,8 +214,12 @@ class GPT(nn.Module):
         tok_emb = self.transformer.wte(idx) # token embeddings of shape (b, t, n_embd)
         pos_emb = self.transformer.wpe(pos) # position embeddings of shape (1, t, n_embd)
         x = self.transformer.drop(tok_emb + pos_emb)
+        if te is not None and isinstance(self.transformer.h[0], te.TransformerLayer):
+            extra_fwd_args = {"is_first_microbatch": is_first_microbatch}
+        else:
+            extra_fwd_args = {}
         for block in self.transformer.h:
-            x = block(x)
+            x = block(x, **extra_fwd_args)
         x = self.transformer.ln_f(x)
 
         if targets is not None:
