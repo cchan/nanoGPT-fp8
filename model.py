@@ -15,6 +15,12 @@ import torch
 import torch.nn as nn
 from torch.nn import functional as F
 
+try:
+    import transformer_engine.pytorch as te
+except ImportError:
+    import traceback; traceback.print_exc()
+    te = None
+
 # @torch.jit.script # good to enable when not using torch.compile, disable when using (our default)
 def new_gelu(x):
     """
@@ -112,8 +118,6 @@ class Block(nn.Module):
         x = x + self.mlp(self.ln_2(x))
         return x
 
-import transformer_engine.pytorch as te
-
 @dataclass
 class GPTConfig:
     block_size: int = 1024
@@ -132,14 +136,21 @@ class GPT(nn.Module):
         assert config.block_size is not None
         self.config = config
 
+        def tlayer(config):
+            if te is not None:
+                # Use TransformerEngine's built-in layer.
+                # TODO: I'm not sure if this is exactly equivalent (it probably isn't)
+                print("Using transformer layer from TransformerEngine")
+                return te.TransformerLayer(config.n_embd, config.n_embd * 4, config.n_head)
+            else:
+                print("Using transformer layer from nanoGPT")
+                return Block(config)
+
         self.transformer = nn.ModuleDict(dict(
             wte = nn.Embedding(config.vocab_size, config.n_embd),
             wpe = nn.Embedding(config.block_size, config.n_embd),
             drop = nn.Dropout(config.dropout),
-            # Use TransformerEngine's built-in layer.
-            # TODO: I'm not sure if this is exactly equivalent (it probably isn't)
-            # h = nn.ModuleList([Block(config) for _ in range(config.n_layer)]),
-            h = nn.ModuleList([te.TransformerLayer(config.n_embd, config.n_embd * 4, config.n_head) for _ in range(config.n_layer)]),
+            h = nn.ModuleList([tlayer(config) for _ in range(config.n_layer)]),
             ln_f = LayerNorm(config.n_embd, bias=config.bias),
         ))
         self.lm_head = nn.Linear(config.n_embd, config.vocab_size, bias=False)
