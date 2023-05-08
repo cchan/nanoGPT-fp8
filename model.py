@@ -127,6 +127,7 @@ class GPTConfig:
     n_embd: int = 768
     dropout: float = 0.0
     bias: bool = True # True: bias in Linears and LayerNorms, like GPT-2. False: a bit better and faster
+    te_layer: bool = False
 
 class GPT(nn.Module):
 
@@ -137,11 +138,21 @@ class GPT(nn.Module):
         self.config = config
 
         def tlayer(config):
-            if te is not None:
+            if config.te_layer:
+                if te is None:
+                    raise ImportError("Couldn't import transformer_engine. Is it installed?")
                 # Use TransformerEngine's built-in layer.
-                # TODO: I'm not sure if this is exactly equivalent (it probably isn't)
+                # Carefully aligned to be equivalent  not sure if this is exactly equivalent (it probably isn't)
                 print("Using transformer layer from TransformerEngine")
-                return te.TransformerLayer(config.n_embd, config.n_embd * 4, config.n_head)
+                return te.TransformerLayer(
+                    config.n_embd,
+                    config.n_embd * 4,
+                    config.n_head,
+                    hidden_dropout=config.dropout,
+                    attention_dropout=config.dropout,
+                    init_method=self._init_weights,
+                    output_layer_init_method=self._init_weights
+                )
             else:
                 print("Using transformer layer from nanoGPT")
                 return Block(config)

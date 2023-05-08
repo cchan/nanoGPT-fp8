@@ -73,6 +73,7 @@ backend = 'nccl' # 'nccl', 'gloo', etc.
 device = 'cuda' # examples: 'cpu', 'cuda', 'cuda:0', 'cuda:1' etc., or try 'mps' on macbooks
 dtype = 'bfloat16' # 'float32', 'bfloat16', or 'float16', the latter will auto implement a GradScaler
 compile = True # use PyTorch 2.0 to compile the model to be faster
+te_layer = False # use transformer_engine's TransformerLayer instead
 # -----------------------------------------------------------------------------
 config_keys = [k for k,v in globals().items() if not k.startswith('_') and isinstance(v, (int, float, bool, str))]
 exec(open('configurator.py').read()) # overrides from command line or config file
@@ -117,6 +118,9 @@ if dtype == "fp8":
     if compile:
         print("WARNING: setting compile to False for dtype=fp8")
     compile = False
+    if not te_layer:
+        print("WARNING: turning on transformer engine layer for dtype=fp8")
+    te_layer = True
 else:
     # note: float16 data type will automatically use a GradScaler
     ptdtype = {'float32': torch.float32, 'bfloat16': torch.bfloat16, 'float16': torch.float16}[dtype]
@@ -153,7 +157,7 @@ if os.path.exists(meta_path):
 
 # model init
 model_args = dict(n_layer=n_layer, n_head=n_head, n_embd=n_embd, block_size=block_size,
-                  bias=bias, vocab_size=None, dropout=dropout) # start with model_args from command line
+                  bias=bias, vocab_size=None, dropout=dropout, te_layer=te_layer) # start with model_args from command line
 if init_from == 'scratch':
     # init a new model from scratch
     print("Initializing a new model from scratch")
@@ -210,6 +214,8 @@ if init_from == 'resume':
 
 # compile the model
 if compile:
+    if te_layer:
+        raise ValueError("Cannot have both compile and te_layer at the same time.")
     print("compiling the model... (takes a ~minute)")
     unoptimized_model = model
     model = torch.compile(model) # requires PyTorch 2.0
